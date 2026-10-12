@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="uk">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+  <title>Дом.бух</title>
+  <script src="https://telegram.org/js/telegram-web-app.js"></script>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <div id="app">
+    <header class="top">
+      <button class="icon-btn" data-action="month-prev" aria-label="Попередній місяць">‹</button>
+      <div class="top-title">
+        <div id="month-label">…</div>
+        <div id="top-sub" class="top-sub"></div>
+      </div>
+      <button class="icon-btn" data-action="month-next" aria-label="Наступний місяць">›</button>
+    </header>
+
+    <main id="view"></main>
+
+    <nav class="tabbar">
+      <button class="tab" data-tab="overview"><span class="tab-ico">◔</span>Огляд</button>
+      <button class="tab" data-tab="history"><span class="tab-ico">☰</span>Історія</button>
+      <button class="fab" data-action="add" aria-label="Додати">＋</button>
+      <button class="tab" data-tab="compare"><span class="tab-ico">▥</span>Порівняння</button>
+      <button class="tab" data-tab="people"><span class="tab-ico">◎</span>Хто</button>
+    </nav>
+  </div>
+
+  <div id="sheet-backdrop" data-action="close-sheet" hidden></div>
+  <section id="sheet" hidden></section>
+  <div id="toast" hidden></div>
+
+  <script src="config.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
