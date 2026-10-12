@@ -271,3 +271,12 @@ input { font: inherit; color: inherit; }
 .fatal { padding: 48px 24px; text-align: center; }
 .fatal .big { font-size: 48px; }
 .fatal code { background: var(--soft); padding: 2px 6px; border-radius: 6px; user-select: all; }
+
+.hint { font-size: 13px; color: var(--hint); margin: 8px 4px 16px; line-height: 1.4; }
+.field-label { display: block; font-size: 12px; color: var(--hint); margin: 0 4px 6px; }
+.field textarea {
+  width: 100%; border: 0; outline: 0; border-radius: 12px; padding: 12px 14px;
+  background: var(--soft); font: inherit; color: inherit; resize: vertical;
+}
+.field input:disabled { opacity: .6; }
+.btn:disabled { opacity: .6; }

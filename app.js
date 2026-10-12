@@ -124,7 +124,7 @@
   function render() {
     renderHeader();
     document.querySelectorAll('.tab').forEach(t => t.classList.toggle('active', t.dataset.tab === state.tab));
-    const views = { overview: viewOverview, history: viewHistory, compare: viewCompare, people: viewPeople };
+    const views = { overview: viewOverview, history: viewHistory, compare: viewCompare, people: viewPeople, categories: viewCategories };
     view.innerHTML = views[state.tab]();
   }
 
@@ -211,7 +211,7 @@
     if (!cats.length) {
       html += emptyState('Цього місяця ще немає витрат.<br>Натисніть <b>＋</b> або напишіть боту <b>кава 85</b>.');
     } else {
-      html += '<section class="card"><h2>Категорії</h2>' +
+      html += '<section class="card"><h2>Категорії<button class="link" data-tab-go="categories">Налаштувати</button></h2>' +
         '<div class="donut-wrap">' + donut(cats, t.exp) +
         '<div class="donut-center"><b>' + moneyShort(t.exp) + '</b><span>' + cats.length + ' катег.</span></div></div>' +
         '<div class="rows">' + cats.map(c => {
@@ -229,7 +229,35 @@
       html += '<section class="card list"><h2 style="margin-top:12px">Останні<button class="link" data-tab-go="history">Усі →</button></h2>' +
         '<div class="rows">' + recent.map(o => opRow(o, { showDate: true })).join('') + '</div></section>';
     }
+    html += '<section class="card list"><div class="rows"><button class="row" data-tab-go="categories">' +
+      '<span class="ico" style="background:var(--soft)">🗂</span>' +
+      '<span class="row-main"><div class="row-title">Категорії й ключові слова</div><div class="row-sub">Додати, перейменувати, навчити бота</div></span>' +
+      '<span class="row-end"><span>›</span></span></button></div></section>';
     return html;
+  }
+
+  // Категорії
+  function isFallback(name) { return name === FALLBACK[EXPENSE] || name === FALLBACK[INCOME]; }
+
+  function viewCategories() {
+    const counts = {};
+    state.ops.forEach(o => { counts[o.category] = (counts[o.category] || 0) + 1; });
+    const group = (type, title) => {
+      const list = state.categories.filter(c => c.type === type);
+      return '<div class="day-head"><span>' + title + '</span><span>' + list.length + '</span></div>' +
+        '<section class="card list"><div class="rows">' + list.map(c => {
+          const m = catMeta(c.name);
+          const kw = c.keywords.length ? c.keywords.slice(0, 5).join(', ') + (c.keywords.length > 5 ? ' +' + (c.keywords.length - 5) : '') : 'без ключових слів';
+          return '<button class="row" data-action="edit-cat" data-cat="' + esc(c.name) + '">' +
+            '<span class="ico" style="background:' + m.color + '22">' + m.emoji + '</span>' +
+            '<span class="row-main"><div class="row-title">' + esc(c.name) + '</div><div class="row-sub">' + esc(kw) + '</div></span>' +
+            '<span class="row-end"><span>' + (counts[c.name] || 0) + ' оп. ›</span></span></button>';
+        }).join('') + '</div></section>';
+    };
+    return '<button class="btn" data-action="new-cat" style="margin:4px 0 4px">＋ Нова категорія</button>' +
+      group(EXPENSE, 'Витрати') + group(INCOME, 'Доходи') +
+      '<p class="hint">Ключові слова допомагають боту: якщо в повідомленні є слово «сільпо», запис потрапить у «Продукти». ' +
+      'Бот також сам запамʼятовує слова, коли ви обираєте категорію кнопкою.</p>';
   }
 
   // Історія
@@ -366,7 +394,90 @@
     if (tg && tg.BackButton) tg.BackButton.hide();
   }
 
+  function openCatSheet(cat) {
+    state.sheet = cat
+      ? { kind: 'cat', isEdit: true, original: cat.name, type: cat.type, name: cat.name, emoji: cat.emoji, keywords: cat.keywords.join(', ') }
+      : { kind: 'cat', type: EXPENSE, name: '', emoji: '', keywords: '' };
+    renderSheet();
+    $('#sheet').hidden = false;
+    $('#sheet-backdrop').hidden = false;
+    if (tg && tg.BackButton) tg.BackButton.show();
+  }
+
+  function renderCatSheet() {
+    const s = state.sheet;
+    const locked = s.isEdit && isFallback(s.original);
+    $('#sheet').innerHTML =
+      '<div class="grabber"></div>' +
+      '<div class="sheet-title"><h3>' + (s.isEdit ? 'Категорія' : 'Нова категорія') + '</h3><button data-action="close-sheet">Закрити</button></div>' +
+      (s.isEdit ? '' :
+        '<div class="seg"><button data-action="set-type" data-type="' + EXPENSE + '" class="' + (s.type === EXPENSE ? 'on' : '') + '">Витрата</button>' +
+        '<button data-action="set-type" data-type="' + INCOME + '" class="' + (s.type === INCOME ? 'on' : '') + '">Дохід</button></div>') +
+      '<div class="field-row" style="grid-template-columns:72px 1fr">' +
+      '<label class="field"><input id="c-emoji" placeholder="🙂" maxlength="8" value="' + esc(s.emoji) + '" style="text-align:center;font-size:22px;padding:8px"></label>' +
+      '<label class="field"><input id="c-name" placeholder="Назва" maxlength="30" value="' + esc(s.name) + '"' + (locked ? ' disabled' : '') + '></label>' +
+      '</div>' +
+      '<label class="field"><span class="field-label">Ключові слова через кому</span>' +
+      '<textarea id="c-keywords" rows="4" placeholder="наприклад: сільпо, атб, магазин">' + esc(s.keywords) + '</textarea></label>' +
+      (s.isEdit && !locked ? '<p class="hint" style="margin:0 0 8px">Якщо перейменувати, усі операції цієї категорії теж оновляться.</p>' : '') +
+      '<button class="btn" data-action="save-cat">' + (s.isEdit ? 'Зберегти' : 'Додати') + '</button>' +
+      (s.isEdit && !locked ? '<button class="btn danger" data-action="delete-cat">Видалити</button>' : '');
+  }
+
+  function readCatInputs() {
+    const s = state.sheet;
+    s.emoji = $('#c-emoji').value;
+    s.name = $('#c-name').value;
+    s.keywords = $('#c-keywords').value;
+  }
+
+  async function saveCat() {
+    readCatInputs();
+    const s = state.sheet;
+    if (!s.name.trim()) {
+      $('#c-name').focus();
+      haptic('error');
+      return;
+    }
+    const btn = $('[data-action="save-cat"]');
+    btn.disabled = true;
+    btn.textContent = 'Зберігаю…';
+    try {
+      const r = await api('saveCategory', { category: { original: s.original, type: s.type, name: s.name.trim(), emoji: s.emoji.trim(), keywords: s.keywords } });
+      const renamed = s.isEdit && r.categories.some(c => c.name === s.name.trim()) && s.original !== s.name.trim();
+      if (renamed) state.ops.forEach(o => { if (o.category === s.original) o.category = s.name.trim(); });
+      state.categories = r.categories;
+      closeSheet();
+      haptic('success');
+      render();
+      toast(s.isEdit ? 'Збережено' : 'Категорію додано');
+    } catch (e) {
+      btn.disabled = false;
+      btn.textContent = s.isEdit ? 'Зберегти' : 'Додати';
+      toast('😕 ' + (e.message === 'error' ? 'Не вдалося зберегти' : e.message));
+    }
+  }
+
+  async function deleteCat() {
+    const s = state.sheet;
+    const n = state.ops.filter(o => o.category === s.original).length;
+    const fb = FALLBACK[s.type];
+    if (!(await confirmBox('Видалити категорію «' + s.original + '»?' + (n ? ' ' + n + ' операцій перейдуть в «' + fb + '».' : '')))) return;
+    try {
+      const r = await api('deleteCategory', { name: s.original });
+      state.ops.forEach(o => { if (o.category === s.original) o.category = fb; });
+      state.categories = r.categories;
+      closeSheet();
+      haptic('warning');
+      render();
+      toast('Видалено');
+    } catch (e) {
+      toast('😕 ' + e.message);
+    }
+  }
+
   function renderSheet() {
+    if (state.sheet.kind === 'cat') return renderCatSheet();
     const s = state.sheet;
     const cats = state.categories.filter(c => c.type === s.type);
     $('#sheet').innerHTML =
@@ -387,6 +498,7 @@
   function readSheetInputs() {
     const s = state.sheet;
     if (!s) return;
+    if (s.kind === 'cat') return readCatInputs();
     s.amount = $('#f-amount').value;
     s.comment = $('#f-comment').value;
     s.date = $('#f-date').value || s.date;
@@ -500,7 +612,7 @@
       readSheetInputs();
       if (state.sheet.type !== el.dataset.type) {
         state.sheet.type = el.dataset.type;
-        state.sheet.category = null;
+        if (state.sheet.kind !== 'cat') state.sheet.category = null;
         renderSheet();
       }
     } else if (a === 'pick-cat') {
@@ -510,6 +622,15 @@
       renderSheet();
     } else if (a === 'save') {
       saveSheet();
+    } else if (a === 'new-cat') {
+      openCatSheet(null);
+    } else if (a === 'edit-cat') {
+      const c = state.categories.find(x => x.name === el.dataset.cat);
+      if (c) openCatSheet(c);
+    } else if (a === 'save-cat') {
+      saveCat();
+    } else if (a === 'delete-cat') {
+      deleteCat();
     } else if (a === 'delete') {
       deleteFromSheet();
     }
@@ -518,7 +639,7 @@
   document.addEventListener('keydown', e => {
     if (e.key === 'Enter' && state.sheet && e.target.tagName === 'INPUT') {
       e.preventDefault();
-      saveSheet();
+      if (state.sheet.kind === 'cat') saveCat(); else saveSheet();
     }
   });
 
@@ -567,11 +688,17 @@
   const Demo = (() => {
     const users = ['Влад', 'Оля'];
     const categories = [
-      [EXPENSE, 'Продукти', '🛒'], [EXPENSE, 'Кафе', '☕'], [EXPENSE, 'Транспорт', '🚕'], [EXPENSE, 'Житло', '🏠'],
-      [EXPENSE, 'Зв’язок', '📱'], [EXPENSE, 'Здоров’я', '💊'], [EXPENSE, 'Одяг', '👕'], [EXPENSE, 'Розваги', '🎬'],
-      [EXPENSE, 'Дім', '🧴'], [EXPENSE, 'Подарунки', '🎁'], [EXPENSE, 'Інше', '📦'],
-      [INCOME, 'Зарплата', '💼'], [INCOME, 'Підробіток', '💻'], [INCOME, 'Інші доходи', '💰'],
-    ].map(([type, name, emoji]) => ({ type, name, emoji, keywords: [] }));
+      [EXPENSE, 'Продукти', '🛒', 'сільпо, атб, novus, магазин'], [EXPENSE, 'Кафе', '☕', 'кава, обід, піца'],
+      [EXPENSE, 'Транспорт', '🚕', 'таксі, bolt, метро'], [EXPENSE, 'Авто', '🚗', 'бензин, окко, мийка'],
+      [EXPENSE, 'Житло', '🏠', 'оренда, комуналка'], [EXPENSE, 'Зв’язок', '📱', 'інтернет, київстар'],
+      [EXPENSE, 'Підписки', '🔁', 'netflix, spotify'], [EXPENSE, 'Здоров’я', '💊', 'аптека, лікар'],
+      [EXPENSE, 'Краса і спорт', '💅', 'барбер, манікюр, спортзал'], [EXPENSE, 'Одяг', '👕', 'кросівки, zara'],
+      [EXPENSE, 'Дім', '🧴', 'епіцентр, побутова хімія'], [EXPENSE, 'Діти', '🧸', 'садок, іграшки'],
+      [EXPENSE, 'Освіта', '📚', 'курси, книги'], [EXPENSE, 'Розваги', '🎬', 'кіно, концерт'],
+      [EXPENSE, 'Подорожі', '✈️', 'квитки, готель'], [EXPENSE, 'Подарунки', '🎁', 'квіти, подарунок'],
+      [EXPENSE, 'Донати', '🇺🇦', 'донат, збір'], [EXPENSE, 'Інше', '📦', ''],
+      [INCOME, 'Зарплата', '💼', 'зарплата, аванс'], [INCOME, 'Підробіток', '💻', 'фріланс'], [INCOME, 'Інші доходи', '💰', 'кешбек'],
+    ].map(([type, name, emoji, kw]) => ({ type, name, emoji, keywords: kw ? kw.split(', ') : [] }));
 
     let seed = 7;
     const rnd = () => { seed = (seed * 16807) % 2147483647; return (seed - 1) / 2147483646; };
@@ -584,7 +711,10 @@
       ['Транспорт', 7, 90, 400, ['таксі', 'Bolt', 'бензин', 'метро']],
       ['Зв’язок', 2, 200, 350, ['інтернет', 'мобільний']],
       ['Здоров’я', 2, 150, 900, ['аптека', 'вітаміни']],
-      ['Розваги', 3, 150, 700, ['кіно', 'Netflix', 'концерт']],
+      ['Розваги', 3, 150, 700, ['кіно', 'концерт']],
+      ['Підписки', 2, 99, 300, ['Netflix', 'Spotify']],
+      ['Авто', 3, 600, 1800, ['бензин', 'мийка']],
+      ['Донати', 2, 200, 1000, ['збір']],
       ['Одяг', 1, 600, 3200, ['кросівки', 'куртка', '']],
       ['Дім', 2, 200, 1500, ['побутова хімія', 'Епіцентр']],
       ['Подарунки', 1, 300, 1500, ['квіти', 'подарунок']],
@@ -616,6 +746,7 @@
     }
 
     let ops = null;
+    const failDemo = d => { const err = new Error(d.error); err.data = d; throw err; };
     const delay = v => new Promise(r => setTimeout(() => r(v), 250));
 
     return {
@@ -633,6 +764,27 @@
           const i = ops.findIndex(o => o.id === p.op.id);
           ops[i] = Object.assign({}, ops[i], p.op, { month: p.op.date.slice(0, 7) });
           return delay({ ok: true, op: ops[i] });
+        }
+        if (action === 'saveCategory') {
+          const c = p.category;
+          const kws = String(c.keywords || '').split(',').map(k => k.trim().toLowerCase()).filter(Boolean);
+          if (categories.some(x => x.name === c.name && x.name !== c.original)) return delay({ ok: false, error: 'Категорія «' + c.name + '» вже існує' }).then(failDemo);
+          if (c.original) {
+            const x = categories.find(y => y.name === c.original);
+            if (c.original !== c.name) ops.forEach(o => { if (o.category === c.original) o.category = c.name; });
+            Object.assign(x, { name: c.name, emoji: c.emoji, keywords: kws });
+          } else {
+            const fb = categories.findIndex(y => y.name === FALLBACK[c.type]);
+            categories.splice(fb, 0, { type: c.type, name: c.name, emoji: c.emoji, keywords: kws });
+          }
+          return delay({ ok: true, categories: categories.map(x => Object.assign({}, x)) });
+        }
+        if (action === 'deleteCategory') {
+          const i = categories.findIndex(y => y.name === p.name);
+          const fb = FALLBACK[categories[i].type];
+          ops.forEach(o => { if (o.category === p.name) o.category = fb; });
+          categories.splice(i, 1);
+          return delay({ ok: true, categories: categories.map(x => Object.assign({}, x)) });
         }
         if (action === 'delete') {
           ops = ops.filter(o => o.id !== p.id);
