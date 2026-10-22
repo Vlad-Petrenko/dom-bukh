@@ -56,6 +56,7 @@
   function sum(list) { return list.reduce((s, o) => s + o.amount, 0); }
 
   function catMeta(name) {
+    if (name === 'Секрет') return { emoji: '🎁', color: '#E26FB0' };
     const i = state.categories.findIndex(c => c.name === name);
     const c = state.categories[i];
     return { emoji: (c && c.emoji) || '•', color: PALETTE[(i < 0 ? PALETTE.length - 1 : i) % PALETTE.length] };
@@ -597,7 +598,8 @@
       openSheet(null);
     } else if (a === 'edit') {
       const op = state.ops.find(o => o.id === el.dataset.id);
-      if (op && !op.pending) openSheet(op);
+      if (op && op.category === 'Секрет') toast('🤫 Секретна покупка — ' + (op.comment.replace('🎁 ', '') || 'розкриється згодом'));
+      else if (op && !op.pending) openSheet(op);
     } else if (a === 'filter-cat') {
       state.filterCat = el.dataset.cat;
       state.tab = 'history';
