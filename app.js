@@ -3,6 +3,12 @@
 
   const tg = window.Telegram && window.Telegram.WebApp;
   const CONFIG = window.DOMBUKH_CONFIG || {};
+  // Бот відкриває додаток з ?api=<URL свого Apps Script>, тож одна копія додатка обслуговує будь-яку таблицю.
+  // Приймаємо лише адреси Apps Script, щоб чуже посилання не відправило дані Telegram на сторонній сервер.
+  const API_URL = (() => {
+    const fromLink = new URLSearchParams(location.search).get('api') || '';
+    return /^https:\/\/script\.google\.com\/macros\/s\/[\w-]+\/exec$/.test(fromLink) ? fromLink : (CONFIG.apiUrl || '');
+  })();
   const DEMO = !(tg && tg.initData);
 
   const EXPENSE = 'Витрата';
@@ -112,7 +118,7 @@
 
   async function api(action, payload) {
     if (DEMO) return Demo.call(action, payload || {});
-    const res = await fetch(CONFIG.apiUrl, {
+    const res = await fetch(API_URL, {
       method: 'POST',
       body: JSON.stringify(Object.assign({ action, initData: tg.initData }, payload)),
     });
@@ -129,7 +135,8 @@
   // Додаток одразу показує останні дані, а свіжі підтягує у фоні.
 
   const userId = DEMO ? 'demo' : ((tg.initDataUnsafe && tg.initDataUnsafe.user && tg.initDataUnsafe.user.id) || 'anon');
-  const CACHE_KEY = 'dombukh:v1:' + userId;
+  // Адреса скрипта в ключі: людина в кількох бюджетах (різних ботах) не побачить чужий кеш.
+  const CACHE_KEY = 'dombukh:v1:' + userId + ':' + API_URL.replace(/^.*\/s\/([\w-]{0,12}).*$/, '$1');
 
   function packOps(ops) { return ops.filter(o => !o.pending).map(o => [o.id, o.date, o.type, o.amount, o.category, o.comment, o.who]); }
   function unpackOps(rows) {
@@ -735,8 +742,8 @@
       try { if (tg.disableVerticalSwipes) tg.disableVerticalSwipes(); } catch (e) { /* ок */ }
       if (tg.BackButton) tg.BackButton.onClick(closeSheet);
     }
-    if (!DEMO && !CONFIG.apiUrl) {
-      return fatal('<div class="big">⚙️</div><p>Не вказано <code>apiUrl</code> у <b>config.js</b>.</p>');
+    if (!DEMO && !API_URL) {
+      return fatal('<div class="big">⚙️</div><p>Не знаю адреси вашої таблиці. Запустіть <code>connectBot</code> в Apps Script і відкрийте додаток знову.</p>');
     }
 
     const cached = loadCache();
@@ -802,7 +809,7 @@
   // ───────── Демо-режим (поза Telegram) ─────────
 
   const Demo = (() => {
-    const users = ['Влад', 'Оля'];
+    const users = ['Я', 'Партнер'];
     const categories = [
       [EXPENSE, 'Продукти', '🛒', 'сільпо, атб, novus, магазин'], [EXPENSE, 'Кафе', '☕', 'кава, обід, піца'],
       [EXPENSE, 'Транспорт', '🚕', 'таксі, bolt, метро'], [EXPENSE, 'Авто', '🚗', 'бензин, окко, мийка'],
