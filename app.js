@@ -54,6 +54,10 @@
     if (n >= 1e4) return nf.format(Math.round(n / 1e3)) + 'к';
     return nf.format(Math.round(n));
   }
+  function plural(n, one, few, many) {
+    const m10 = n % 10, m100 = n % 100;
+    return m10 === 1 && m100 !== 11 ? one : m10 >= 2 && m10 <= 4 && (m100 < 12 || m100 > 14) ? few : many;
+  }
   function sum(list) { return list.reduce((s, o) => s + o.amount, 0); }
 
   function catMeta(name) {
@@ -188,8 +192,12 @@
 
   function renderHeader() {
     $('#month-label').innerHTML = esc(monthName(state.month)) + (DEMO ? '<span class="demo-badge">ДЕМО</span>' : '');
-    const t = totals(opsOf(state.month));
-    $('#top-sub').textContent = t.exp || t.inc ? 'витрачено ' + money(t.exp) : '';
+    const ops = opsOf(state.month);
+    const t = totals(ops);
+    // На «Огляді» сума вже велика в картці, тож у шапці — кількість операцій.
+    $('#top-sub').textContent = !ops.length ? ''
+      : state.tab === 'overview' ? ops.length + ' ' + plural(ops.length, 'операція', 'операції', 'операцій')
+      : 'витрачено ' + money(t.exp);
     $('[data-action="month-next"]').disabled = state.month >= monthKey(new Date());
   }
 
