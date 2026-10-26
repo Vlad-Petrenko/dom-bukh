@@ -25,6 +25,8 @@
     tab: 'overview',
     filterCat: null,
     sheet: null,
+    loadedFrom: null,      // з якого місяця завантажено історію ('0000' — уся)
+    loadingOlder: false,
   };
 
   const $ = sel => document.querySelector(sel);
@@ -127,12 +129,33 @@
     document.querySelectorAll('.tab').forEach(t => t.classList.toggle('active', t.dataset.tab === state.tab));
     const views = { overview: viewOverview, history: viewHistory, compare: viewCompare, people: viewPeople, categories: viewCategories };
     view.innerHTML = views[state.tab]();
+    ensureHistory();
+  }
+
+  // Спершу завантажуються останні 13 місяців; старіші — у фоні, коли до них доходить черга.
+  async function ensureHistory() {
+    const needFrom = shiftMonth(state.month, -6);
+    if (!state.loadedFrom || state.loadingOlder || needFrom >= state.loadedFrom) return;
+    state.loadingOlder = true;
+    renderHeader();
+    try {
+      const r = await api('history', { before: state.loadedFrom });
+      const known = new Set(state.ops.map(o => o.id));
+      r.ops.forEach(([id, date, type, amount, category, comment, who]) => {
+        if (!known.has(id)) state.ops.push({ id, date, month: date.slice(0, 7), type, amount, category, comment, who });
+      });
+      state.loadedFrom = '0000';
+    } catch (e) {
+      toast('Не вдалося завантажити старішу історію');
+    }
+    state.loadingOlder = false;
+    render();
   }
 
   function renderHeader() {
     $('#month-label').innerHTML = esc(monthName(state.month)) + (DEMO ? '<span class="demo-badge">ДЕМО</span>' : '');
     const t = totals(opsOf(state.month));
-    $('#top-sub').textContent = t.exp || t.inc ? 'витрачено ' + money(t.exp) : '';
+    $('#top-sub').textContent = state.loadingOlder ? 'завантажую історію…' : t.exp || t.inc ? 'витрачено ' + money(t.exp) : '';
     $('[data-action="month-next"]').disabled = state.month >= monthKey(new Date());
   }
 
@@ -673,6 +696,7 @@
       state.currency = data.currency || '₴';
       state.categories = data.categories;
       state.ops = data.ops;
+      state.loadedFrom = data.loadedFrom || null;
       render();
     } catch (e) {
       if (e.data && e.data.error === 'forbidden') {
@@ -756,8 +780,13 @@
     return {
       call(action, p) {
         if (!ops) ops = generate();
+        if (action === 'history') {
+          const older = ops.filter(o => o.month < p.before).map(o => [o.id, o.date, o.type, o.amount, o.category, o.comment, o.who]);
+          return delay({ ok: true, ops: older });
+        }
         if (action === 'init') {
-          return delay({ ok: true, me: { id: 0, name: users[0] }, users, currency: '₴', categories, ops: ops.slice() });
+          const from = shiftMonth(monthKey(new Date()), -2);
+          return delay({ ok: true, me: { id: 0, name: users[0] }, users, currency: '₴', categories, ops: ops.filter(o => o.month >= from), loadedFrom: from });
         }
         if (action === 'add') {
           const op = Object.assign({}, p.op, { id: 'd' + Date.now(), month: p.op.date.slice(0, 7), who: users[0] });
