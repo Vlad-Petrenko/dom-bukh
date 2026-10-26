@@ -25,8 +25,7 @@
     tab: 'overview',
     filterCat: null,
     sheet: null,
-    loadedFrom: null,      // з якого місяця завантажено історію ('0000' — уся)
-    loadingOlder: false,
+    version: '',           // версія даних на сервері, з якою збігається кеш
   };
 
   const $ = sel => document.querySelector(sel);
@@ -122,6 +121,62 @@
     return data;
   }
 
+  // ───────── Кеш на телефоні ─────────
+  // Додаток одразу показує останні дані, а свіжі підтягує у фоні.
+
+  const userId = DEMO ? 'demo' : ((tg.initDataUnsafe && tg.initDataUnsafe.user && tg.initDataUnsafe.user.id) || 'anon');
+  const CACHE_KEY = 'dombukh:v1:' + userId;
+
+  function packOps(ops) { return ops.filter(o => !o.pending).map(o => [o.id, o.date, o.type, o.amount, o.category, o.comment, o.who]); }
+  function unpackOps(rows) {
+    return rows.map(([id, date, type, amount, category, comment, who]) => ({ id, date, month: date.slice(0, 7), type, amount, category, comment, who }));
+  }
+
+  function loadCache() {
+    try {
+      const raw = localStorage.getItem(CACHE_KEY);
+      return raw ? JSON.parse(raw) : null;
+    } catch (e) {
+      return null;
+    }
+  }
+
+  /** Версію не оновлюємо після власних змін: інакше пропустили б зміни другої людини. */
+  function saveCache() {
+    try {
+      localStorage.setItem(CACHE_KEY, JSON.stringify({
+        version: state.version, savedAt: Date.now(), me: state.me, users: state.users,
+        currency: state.currency, categories: state.categories, ops: packOps(state.ops),
+      }));
+    } catch (e) { /* немає місця або сховище заборонене — працюємо без кешу */ }
+  }
+
+  function applyData(d) {
+    state.me = d.me;
+    state.users = d.users;
+    state.currency = d.currency || '₴';
+    state.categories = d.categories;
+    state.ops = unpackOps(d.ops);
+    state.version = d.version || '';
+  }
+
+  let syncTimer;
+  /** Плашка стану під шапкою: busy — оновлюю, ok — оновлено (зникає), warn — помилка (натиснути, щоб повторити). */
+  function setSync(kind, text) {
+    const el = $('#sync');
+    clearTimeout(syncTimer);
+    el.className = 'sync ' + kind;
+    el.innerHTML = (kind === 'busy' ? '<span class="spin"></span>' : '') + esc(text);
+    el.hidden = false;
+    if (kind === 'ok') syncTimer = setTimeout(() => { el.hidden = true; }, 2000);
+  }
+
+  function timeLabel(ts) {
+    const d = new Date(ts);
+    const today = dateKey(d) === dateKey(new Date());
+    return (today ? '' : d.getDate() + ' ' + MONTHS_GEN[d.getMonth()] + ' ') + pad(d.getHours()) + ':' + pad(d.getMinutes());
+  }
+
   // ───────── Рендер ─────────
 
   function render() {
@@ -129,33 +184,12 @@
     document.querySelectorAll('.tab').forEach(t => t.classList.toggle('active', t.dataset.tab === state.tab));
     const views = { overview: viewOverview, history: viewHistory, compare: viewCompare, people: viewPeople, categories: viewCategories };
     view.innerHTML = views[state.tab]();
-    ensureHistory();
-  }
-
-  // Спершу завантажуються останні 13 місяців; старіші — у фоні, коли до них доходить черга.
-  async function ensureHistory() {
-    const needFrom = shiftMonth(state.month, -6);
-    if (!state.loadedFrom || state.loadingOlder || needFrom >= state.loadedFrom) return;
-    state.loadingOlder = true;
-    renderHeader();
-    try {
-      const r = await api('history', { before: state.loadedFrom });
-      const known = new Set(state.ops.map(o => o.id));
-      r.ops.forEach(([id, date, type, amount, category, comment, who]) => {
-        if (!known.has(id)) state.ops.push({ id, date, month: date.slice(0, 7), type, amount, category, comment, who });
-      });
-      state.loadedFrom = '0000';
-    } catch (e) {
-      toast('Не вдалося завантажити старішу історію');
-    }
-    state.loadingOlder = false;
-    render();
   }
 
   function renderHeader() {
     $('#month-label').innerHTML = esc(monthName(state.month)) + (DEMO ? '<span class="demo-badge">ДЕМО</span>' : '');
     const t = totals(opsOf(state.month));
-    $('#top-sub').textContent = state.loadingOlder ? 'завантажую історію…' : t.exp || t.inc ? 'витрачено ' + money(t.exp) : '';
+    $('#top-sub').textContent = t.exp || t.inc ? 'витрачено ' + money(t.exp) : '';
     $('[data-action="month-next"]').disabled = state.month >= monthKey(new Date());
   }
 
@@ -176,7 +210,7 @@
   function opRow(o, opts) {
     const meta = catMeta(o.category);
     const sign = o.type === INCOME ? '+' : '−';
-    const sub = [o.comment, opts && opts.showDate ? shortDate(o.date) : '', state.users.length > 1 ? o.who : '']
+    const sub = o.pending ? '⏳ зберігаю…' : [o.comment, opts && opts.showDate ? shortDate(o.date) : '', state.users.length > 1 ? o.who : '']
       .filter(Boolean).map(esc).join(' · ');
     return '<button class="row' + (o.pending ? ' pending' : '') + '" data-action="edit" data-id="' + esc(o.id) + '">' +
       '<span class="ico" style="background:' + meta.color + '22">' + meta.emoji + '</span>' +
@@ -471,6 +505,7 @@
       const renamed = s.isEdit && r.categories.some(c => c.name === s.name.trim()) && s.original !== s.name.trim();
       if (renamed) state.ops.forEach(o => { if (o.category === s.original) o.category = s.name.trim(); });
       state.categories = r.categories;
+      saveCache();
       closeSheet();
       haptic('success');
       render();
@@ -491,6 +526,7 @@
       const r = await api('deleteCategory', { name: s.original });
       state.ops.forEach(o => { if (o.category === s.original) o.category = fb; });
       state.categories = r.categories;
+      saveCache();
       closeSheet();
       haptic('warning');
       render();
@@ -551,6 +587,7 @@
       try {
         const r = await api('update', { op });
         replaceOp(op.id, r.op);
+        saveCache();
       } catch (e) {
         replaceOp(op.id, old);
         toast('Не вдалося зберегти 😕');
@@ -562,6 +599,7 @@
       try {
         const r = await api('add', { op });
         replaceOp(tmp.id, r.op);
+        saveCache();
         toast('Додано: ' + catMeta(r.op.category).emoji + ' ' + money(r.op.amount));
       } catch (e) {
         state.ops = state.ops.filter(o => o.id !== tmp.id);
@@ -587,6 +625,7 @@
     haptic('warning');
     try {
       await api('delete', { id });
+      saveCache();
       toast('Видалено');
     } catch (e) {
       state.ops.push(old);
@@ -647,6 +686,10 @@
       renderSheet();
     } else if (a === 'save') {
       saveSheet();
+    } else if (a === 'sync-retry') {
+      if (state.me && el.classList.contains('warn')) sync(loadCache());
+    } else if (a === 'reload') {
+      location.reload();
     } else if (a === 'new-cat') {
       openCatSheet(null);
     } else if (a === 'edit-cat') {
@@ -688,25 +731,64 @@
       return fatal('<div class="big">⚙️</div><p>Не вказано <code>apiUrl</code> у <b>config.js</b>.</p>');
     }
 
-    view.innerHTML = '<div class="skeleton"></div><div class="skeleton" style="height:260px"></div>';
-    try {
-      const data = await api('init');
-      state.me = data.me;
-      state.users = data.users;
-      state.currency = data.currency || '₴';
-      state.categories = data.categories;
-      state.ops = data.ops;
-      state.loadedFrom = data.loadedFrom || null;
+    const cached = loadCache();
+    if (cached) {
+      applyData(cached);
       render();
-    } catch (e) {
-      if (e.data && e.data.error === 'forbidden') {
-        fatal('<div class="big">⛔️</div><p>Немає доступу.</p><p>Ваш Telegram ID: <code>' + esc(e.data.userId) + '</code><br>Додайте його в ALLOWED_USERS.</p>');
-      } else if (e.data && e.data.error === 'unauthorized') {
-        fatal('<div class="big">🔒</div><p>Сесія застаріла. Закрийте й відкрийте додаток знову.</p>');
-      } else {
-        fatal('<div class="big">😕</div><p>Не вдалося завантажити дані.</p><p style="color:var(--hint)">' + esc(e.message) + '</p>');
-      }
     }
+    sync(cached);
+  }
+
+  /** Перше відкриття: екран із кроками. Далі: кеш одразу + оновлення у фоні з плашкою стану. */
+  async function sync(cached) {
+    const stopLoader = cached ? null : showLoader();
+    if (cached) setSync('busy', 'Оновлюю дані…');
+    try {
+      const data = await api('init', { version: cached ? cached.version : '' });
+      if (stopLoader) stopLoader();
+      if (data.unchanged) {
+        state.me = data.me;
+        state.users = data.users;
+        setSync('ok', '✓ Дані актуальні');
+      } else {
+        applyData(data);
+        saveCache();
+        render();
+        if (cached) setSync('ok', '✓ Оновлено');
+      }
+    } catch (e) {
+      if (stopLoader) stopLoader();
+      if (e.data && e.data.error === 'forbidden') {
+        try { localStorage.removeItem(CACHE_KEY); } catch (err) { /* ок */ }
+        return fatal('<div class="big">⛔️</div><p>Немає доступу.</p><p>Ваш Telegram ID: <code>' + esc(e.data.userId) + '</code><br>Додайте його в ALLOWED_USERS.</p>');
+      }
+      if (e.data && e.data.error === 'unauthorized') {
+        if (cached) return setSync('warn', '🔒 Сесія застаріла — закрийте й відкрийте додаток');
+        return fatal('<div class="big">🔒</div><p>Сесія застаріла. Закрийте й відкрийте додаток знову.</p>');
+      }
+      if (cached) return setSync('warn', '⚠️ Немає звʼязку · дані від ' + timeLabel(cached.savedAt) + ' · повторити');
+      fatal('<div class="big">😕</div><p>Не вдалося завантажити дані.</p><p style="color:var(--hint)">' + esc(e.message) + '</p>' +
+        '<button class="btn" data-action="reload" style="max-width:240px;margin:16px auto 0">Спробувати ще раз</button>');
+    }
+  }
+
+  function showLoader() {
+    document.body.classList.add('loading');
+    const steps = ['Підключаюсь до таблиці…', 'Завантажую операції…', 'Рахую статистику…', 'Ще трошки…'];
+    view.innerHTML = '<div class="loader"><div class="loader-ico">🪙</div>' +
+      '<div class="loader-text" id="loader-text">' + steps[0] + '</div>' +
+      '<div class="progress"><i></i></div>' +
+      '<div class="loader-hint">Перше відкриття займає кілька секунд —<br>далі дані відкриватимуться миттєво</div></div>';
+    let i = 0;
+    const timer = setInterval(() => {
+      i = Math.min(i + 1, steps.length - 1);
+      const el = $('#loader-text');
+      if (el) el.textContent = steps[i];
+    }, 1600);
+    return () => {
+      clearInterval(timer);
+      document.body.classList.remove('loading');
+    };
   }
 
   // ───────── Демо-режим (поза Telegram) ─────────
@@ -775,7 +857,7 @@
 
     let ops = null;
     const failDemo = d => { const err = new Error(d.error); err.data = d; throw err; };
-    const delay = v => new Promise(r => setTimeout(() => r(v), 250));
+    const delay = (v, ms) => new Promise(r => setTimeout(() => r(v), ms || 250));
 
     return {
       call(action, p) {
@@ -785,8 +867,9 @@
           return delay({ ok: true, ops: older });
         }
         if (action === 'init') {
-          const from = shiftMonth(monthKey(new Date()), -2);
-          return delay({ ok: true, me: { id: 0, name: users[0] }, users, currency: '₴', categories, ops: ops.filter(o => o.month >= from), loadedFrom: from });
+          const base = { ok: true, version: 'demo-1', me: { id: 0, name: users[0] }, users, currency: '₴' };
+          if (p.version === 'demo-1') return delay(Object.assign(base, { unchanged: true }));
+          return delay(Object.assign(base, { categories, ops: ops.map(o => [o.id, o.date, o.type, o.amount, o.category, o.comment, o.who]) }), 1500);
         }
         if (action === 'add') {
           const op = Object.assign({}, p.op, { id: 'd' + Date.now(), month: p.op.date.slice(0, 7), who: users[0] });

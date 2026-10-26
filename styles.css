@@ -280,3 +280,33 @@ input { font: inherit; color: inherit; }
 }
 .field input:disabled { opacity: .6; }
 .btn:disabled { opacity: .6; }
+
+/* ── Стан синхронізації ── */
+.sync {
+  position: fixed; top: calc(60px + env(safe-area-inset-top)); left: 50%; transform: translateX(-50%); z-index: 7;
+  width: max-content; max-width: calc(100% - 32px);
+  display: flex; align-items: center; gap: 8px;
+  padding: 6px 12px; border-radius: 999px; font-size: 13px; font-weight: 550;
+  background: var(--bg); color: var(--hint); border: 1px solid var(--line); box-shadow: 0 4px 14px rgba(0,0,0,.18);
+  animation: fade .2s ease;
+}
+.sync[hidden] { display: none; }
+.sync.ok { color: var(--green); }
+.sync.warn { color: #c77700; cursor: pointer; }
+.spin {
+  width: 12px; height: 12px; border-radius: 50%;
+  border: 2px solid var(--line); border-top-color: var(--accent);
+  animation: rot .8s linear infinite;
+}
+@keyframes rot { to { transform: rotate(360deg); } }
+
+/* ── Перше завантаження ── */
+body.loading .tabbar, body.loading .top { visibility: hidden; }
+.loader { min-height: 70vh; display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; gap: 12px; }
+.loader-ico { font-size: 44px; animation: bob 1.4s ease-in-out infinite; }
+@keyframes bob { 50% { transform: translateY(-6px); } }
+.loader-text { font-size: 16px; font-weight: 600; min-height: 22px; }
+.loader-hint { font-size: 13px; color: var(--hint); line-height: 1.4; }
+.progress { width: 200px; height: 4px; border-radius: 2px; background: var(--soft); overflow: hidden; }
+.progress i { display: block; width: 40%; height: 100%; border-radius: 2px; background: var(--accent); animation: slide 1.2s ease-in-out infinite; }
+@keyframes slide { from { transform: translateX(-100%); } to { transform: translateX(250%); } }
